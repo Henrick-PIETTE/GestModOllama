@@ -6,7 +6,7 @@
 
 <p align="center">
   Télécharger, organiser, sauvegarder et évaluer vos modèles de langage locaux.<br>
-  <sub>Windows x64 · Version 1.0 · Licence MIT · Développé par Henrick PIETTE (2026)</sub>
+  <sub>Windows x64 · Version 1.1 · Licence MIT · Développé par Henrick PIETTE (2026)</sub>
 </p>
 
 <p align="center">
@@ -16,7 +16,9 @@
 ## Télécharger
 
 Rendez-vous dans la page **[Releases](../../releases/latest)** et téléchargez
-`GestModOllama-v1.0-windows-x64.exe`. Aucune installation : double-cliquez sur le fichier.
+`GestModOllama-windows-x64.exe`. Aucune installation : double-cliquez sur le fichier.
+Ensuite, le programme se met à jour tout seul : au démarrage, il vérifie s'il existe une nouvelle
+version et propose de l'installer (vérification désactivable dans les Réglages).
 
 > [Ollama](https://ollama.com) doit être installé et lancé sur le PC.
 > Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » :
@@ -41,8 +43,12 @@ Rendez-vous dans la page **[Releases](../../releases/latest)** et téléchargez
 - Attention : le code Python écrit par les modèles est exécuté sur le PC
   (dossier temporaire, 20 secondes au maximum).
 
-**Réglages** (roue dentée en bas à gauche) : langue (français, English, español, Deutsch)
-et taille du contexte du benchmark.
+**Réglages** (roue dentée en bas à gauche) : langue (français, English, español, Deutsch),
+taille du contexte du benchmark, vérification des mises à jour au démarrage.
+
+**Mises à jour** : vérification au démarrage (ou menu Aide > Rechercher les mises à jour),
+téléchargement depuis GitHub avec contrôle de l'empreinte SHA-256, installation et redémarrage
+automatiques. Le programme garde son nom : les raccourcis continuent de fonctionner.
 
 ## Lancer depuis le code source
 
@@ -58,7 +64,7 @@ Pour fabriquer le `.exe` : double-cliquez sur `compiler.bat` (installe PyInstall
 
 *English:* a Windows desktop manager for local [Ollama](https://ollama.com) models (download, update,
 copy, delete, unload, export/import) with a built-in coding benchmark (assembly, decompilation,
-reasoning). Interface available in English, French, Spanish and German. MIT License.
+reasoning) and automatic updates from GitHub Releases. Interface available in English, French, Spanish and German. MIT License.
 
 ## Licence
 

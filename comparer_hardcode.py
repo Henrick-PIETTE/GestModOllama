@@ -1,6 +1,6 @@
 """
 Gestionnaire de modèles Ollama - avec un benchmark de code "hardcore" (assembleur, décompilation).
-Version 1.0 - PixtrekCoder - Développé par Henrick PIETTE - Licence MIT - 2026
+Version 1.1 - PixtrekCoder - Développé par Henrick PIETTE - Licence MIT - 2026
 
 FONCTION PRINCIPALE (onglet « Modèles », ouvert au démarrage) : gérer les modèles d'Ollama
   - liste des modèles installés (paramètres, quantification, taille, contexte, mémoire GPU),
@@ -44,13 +44,14 @@ import time
 import unicodedata
 import urllib.error
 import urllib.request
+import webbrowser
 
-VERSION = "1.0"
+VERSION = "1.1"
 SIGNATURE = "PixtrekCoder"
 AUTEUR = "Henrick PIETTE"
 LICENCE = "MIT"
 ANNEE = "2026"
-DEPOT_GITHUB = ""        # adresse du dépôt GitHub (affichée dans « À propos » si elle est remplie)
+DEPOT_GITHUB = "https://github.com/Henrick-PIETTE/GestModOllama"   # lien affiché dans « À propos »
 
 # ---------------------------------------------------------------
 # 1) RÉGLAGES
@@ -77,9 +78,15 @@ LANGUE = "fr"            # fr, en, es ou de
 CONTEXTE_CHOISI = 0      # 0 = automatique (8192 sans réflexion, 16384 avec)
 LANGUES = [("fr", "Français"), ("en", "English"), ("es", "Español"), ("de", "Deutsch")]
 
+# Mises à jour : on regarde la dernière « Release » publiée sur GitHub
+API_MAJ = "https://api.github.com/repos/Henrick-PIETTE/GestModOllama/releases/latest"
+MAJ_HTTPS_SEULEMENT = True   # refuse un téléchargement qui n'est pas en https (les tests le mettent à False)
+VERIF_MAJ = True             # vérifier les mises à jour au démarrage (réglable par l'utilisateur)
+MAJ_VERIFIEE = False         # True une fois la vérification du démarrage faite dans ce lancement
+
 
 def charger_reglages():
-    global LANGUE, CONTEXTE_CHOISI
+    global LANGUE, CONTEXTE_CHOISI, VERIF_MAJ
     try:
         with open(FICHIER_REGLAGES, encoding="utf-8") as f:
             r = json.load(f)
@@ -87,6 +94,7 @@ def charger_reglages():
             LANGUE = r["langue"]
         c = int(r.get("contexte", 0) or 0)
         CONTEXTE_CHOISI = c if 2048 <= c <= 262144 else 0
+        VERIF_MAJ = bool(r.get("verif_maj", True))     # ancien fichier sans la clé : activée
     except Exception:
         pass       # pas de fichier ou fichier abîmé : on garde les valeurs par défaut
 
@@ -94,7 +102,7 @@ def charger_reglages():
 def sauver_reglages():
     try:
         with open(FICHIER_REGLAGES, "w", encoding="utf-8") as f:
-            json.dump({"langue": LANGUE, "contexte": CONTEXTE_CHOISI}, f, indent=2)
+            json.dump({"langue": LANGUE, "contexte": CONTEXTE_CHOISI, "verif_maj": bool(VERIF_MAJ)}, f, indent=2)
         return True
     except Exception:
         return False
@@ -134,6 +142,75 @@ TEXTES = {
                "Desarrollado por {a}  ·  Licencia {l}  ·  {y}", "Entwickelt von {a}  ·  {l}-Lizenz  ·  {y}"),
     "lien_github": ("Page du projet sur GitHub", "Project page on GitHub", "Página del proyecto en GitHub",
                     "Projektseite auf GitHub"),
+    # ----- Mises à jour -----
+    "maj_dispo_t": ("Mise à jour disponible", "Update available", "Actualización disponible",
+                    "Update verfügbar"),
+    "maj_dispo": ("La version {n} est disponible (vous avez la version {a}).",
+                  "Version {n} is available (you have version {a}).",
+                  "La versión {n} está disponible (usted tiene la versión {a}).",
+                  "Version {n} ist verfügbar (Sie haben Version {a})."),
+    "maj_demarrage": ("Vérifier les mises à jour au démarrage", "Check for updates at startup",
+                      "Buscar actualizaciones al iniciar", "Beim Start nach Updates suchen"),
+    "maj_telecharger": ("Télécharger et installer", "Download and install", "Descargar e instalar",
+                        "Herunterladen und installieren"),
+    "maj_page": ("Page de téléchargement", "Download page", "Página de descarga", "Download-Seite"),
+    "maj_plus_tard": ("Plus tard", "Later", "Más tarde", "Später"),
+    "maj_verif": ("Rechercher les mises à jour...", "Check for updates...", "Buscar actualizaciones...",
+                  "Nach Updates suchen..."),
+    "maj_verif_btn": ("Rechercher les mises à jour", "Check for updates", "Buscar actualizaciones",
+                      "Nach Updates suchen"),
+    "maj_a_jour": ("Vous avez la dernière version (v{v}).", "You have the latest version (v{v}).",
+                   "Tiene la última versión (v{v}).", "Sie haben die neueste Version (v{v})."),
+    "maj_erreur": ("Impossible de vérifier les mises à jour : {e}", "Unable to check for updates: {e}",
+                   "No se pudo buscar actualizaciones: {e}", "Die Updates konnten nicht geprüft werden: {e}"),
+    "maj_erreur_journal": ("Vérification des mises à jour impossible : {e}", "Update check failed: {e}",
+                           "Falló la búsqueda de actualizaciones: {e}",
+                           "Update-Prüfung fehlgeschlagen: {e}"),
+    "maj_occupe": ("Un test ou un transfert est en cours. Réessayez quand il sera terminé.",
+                   "A test or a transfer is in progress. Try again when it is finished.",
+                   "Hay una prueba o una transferencia en curso. Inténtelo de nuevo cuando termine.",
+                   "Ein Test oder eine Übertragung läuft. Versuchen Sie es nach dem Ende erneut."),
+    "maj_statut": ("Téléchargement de la version {n}...", "Downloading version {n}...",
+                   "Descargando la versión {n}...", "Version {n} wird heruntergeladen..."),
+    "maj_dl_debut": ("Téléchargement de {f} ({t})", "Downloading {f} ({t})",
+                     "Descargando {f} ({t})", "Lade {f} herunter ({t})"),
+    "maj_pas_de_fichier": ("Aucun fichier à télécharger pour cette version.",
+                           "No file to download for this version.",
+                           "No hay ningún archivo para descargar en esta versión.",
+                           "Für diese Version gibt es keine Datei zum Herunterladen."),
+    "maj_place": ("Pas assez de place sur le disque pour télécharger la mise à jour.",
+                  "Not enough disk space to download the update.",
+                  "No hay suficiente espacio en disco para descargar la actualización.",
+                  "Nicht genug Speicherplatz für das Update."),
+    "maj_taille_ko": ("Le fichier téléchargé est incomplet ou de mauvaise taille.",
+                      "The downloaded file is incomplete or has the wrong size.",
+                      "El archivo descargado está incompleto o tiene un tamaño incorrecto.",
+                      "Die heruntergeladene Datei ist unvollständig oder hat die falsche Größe."),
+    "maj_sha_ko": ("L'empreinte SHA-256 du fichier ne correspond pas : fichier refusé.",
+                   "The file's SHA-256 does not match: file rejected.",
+                   "El SHA-256 del archivo no coincide: archivo rechazado.",
+                   "Die SHA-256-Prüfsumme der Datei stimmt nicht: Datei abgelehnt."),
+    "maj_sha_absent": ("Attention : GitHub ne fournit pas d'empreinte SHA-256, intégrité non vérifiée.",
+                       "Warning: GitHub provides no SHA-256, integrity not verified.",
+                       "Atención: GitHub no proporciona SHA-256, integridad sin verificar.",
+                       "Achtung: GitHub liefert keine SHA-256-Prüfsumme, Integrität nicht geprüft."),
+    "maj_dl_ok": ("Mise à jour téléchargée : {c}", "Update downloaded: {c}",
+                  "Actualización descargada: {c}", "Update heruntergeladen: {c}"),
+    "maj_redemarrer": ("Mise à jour v{n} téléchargée. Redémarrer maintenant ?",
+                       "Update v{n} downloaded. Restart now?",
+                       "Actualización v{n} descargada. ¿Reiniciar ahora?",
+                       "Update v{n} heruntergeladen. Jetzt neu starten?"),
+    "maj_fichier_dossier": ("Le fichier est dans le dossier du programme :\n{c}",
+                            "The file is in the program folder:\n{c}",
+                            "El archivo está en la carpeta del programa:\n{c}",
+                            "Die Datei liegt im Programmordner:\n{c}"),
+    "maj_install_err": ("Installation impossible : {e}\n\nVous pouvez lancer à la main le fichier :\n{c}",
+                        "Installation failed: {e}\n\nYou can run the file manually:\n{c}",
+                        "No se pudo instalar: {e}\n\nPuede ejecutar el archivo manualmente:\n{c}",
+                        "Installation nicht möglich: {e}\n\nSie können die Datei von Hand starten:\n{c}"),
+    "maj_nom_refuse": ("Nom de fichier de mise à jour refusé : {f}", "Update file name rejected: {f}",
+                       "Nombre de archivo de actualización rechazado: {f}",
+                       "Dateiname des Updates abgelehnt: {f}"),
     "unite_go": ("Go", "GB", "GB", "GB"),
     "unite_mo": ("Mo", "MB", "MB", "MB"),
     "touche_suppr": ("Suppr", "Del", "Supr", "Entf"),
@@ -230,7 +307,6 @@ TEXTES = {
     "det_famille": ("Famille", "Family", "Familia", "Familie"),
     "det_params": ("Paramètres", "Parameters", "Parámetros", "Parameter"),
     "det_quantif": ("Quantification", "Quantization", "Cuantificación", "Quantisierung"),
-    "det_format": ("Format", "Format", "Formato", "Format"),
     "det_taille": ("Taille", "Size", "Tamaño", "Größe"),
     "det_contexte": ("Contexte max", "Max context", "Contexto máx.", "Max. Kontext"),
     "det_capacites": ("Capacités", "Capabilities", "Capacidades", "Fähigkeiten"),
@@ -550,7 +626,7 @@ TEXTES = {
     "pdf_vide": ("aucun résultat exploitable", "no usable results", "ningún resultado utilizable", "keine verwertbaren Ergebnisse"),
     "pdf_page": ("Page {i} / {n}", "Page {i} / {n}", "Página {i} / {n}", "Seite {i} / {n}"),
 
-    # ----- Fenêtre Gestion des modèles -----
+    # ----- Onglet Modèles -----
     "gm_col_nom": ("Nom du modèle", "Model name", "Nombre del modelo", "Modellname"),
     "gm_col_taille": ("Taille", "Size", "Tamaño", "Größe"),
     "gm_col_date": ("Modifié le", "Modified", "Modificado", "Geändert"),
@@ -2216,6 +2292,178 @@ def telecharger_modele(nom, ecrire, progres=None):
 
 
 # ---------------------------------------------------------------
+# 7 bis) MISES À JOUR (via les « Releases » de GitHub)
+# ---------------------------------------------------------------
+def version_tuple(texte):
+    """« v1.10 » -> (1, 10) ; « 1.1 » -> (1, 1) ; texte invalide -> ().
+    On compare des tuples : (1, 10) > (1, 9), ce que ne ferait pas une comparaison de textes."""
+    m = re.fullmatch(r"\s*[vV]?(\d+(?:\.\d+)*)\s*", str(texte or ""))
+    if not m:
+        return ()
+    t = [int(n) for n in m.group(1).split(".")]
+    while t and t[-1] == 0:          # « 1.1.0 » vaut « 1.1 » : on retire les zéros de fin
+        t.pop()
+    return tuple(t)
+
+
+def nom_fichier_sur(nom):
+    """Un nom de fichier de mise à jour est sûr s'il n'a pas de chemin, pas de « .. » et finit par .exe."""
+    return (bool(nom) and nom == os.path.basename(nom) and "/" not in nom and "\\" not in nom
+            and ".." not in nom and nom.lower().endswith(".exe"))
+
+
+def chercher_mise_a_jour(delai=8):
+    """Interroge GitHub. Retourne None si on est à jour, sinon un dictionnaire décrivant la nouvelle
+    version : version, page, notes, fichier, url, taille, sha256.
+    Lève une exception en cas d'erreur réseau ou de réponse illisible (l'appelant décide quoi en faire)."""
+    requete = urllib.request.Request(API_MAJ, headers={
+        "User-Agent": f"GestModOllama/{VERSION}",          # aucune information personnelle
+        "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(requete, timeout=delai) as r:
+        release = json.loads(r.read().decode("utf-8"))
+    if not isinstance(release, dict):
+        raise ValueError("réponse inattendue")
+    if release.get("draft") or release.get("prerelease"):
+        return None
+    nouveau = version_tuple(release.get("tag_name"))
+    if not nouveau or nouveau <= version_tuple(VERSION):
+        return None
+
+    # Le fichier à télécharger : de préférence « ...windows-x64.exe », sinon le premier .exe
+    assets = [a for a in (release.get("assets") or []) if isinstance(a, dict)]
+    exe = [a for a in assets if str(a.get("name", "")).lower().endswith(".exe")]
+    choisi = next((a for a in exe if str(a["name"]).lower().endswith("windows-x64.exe")), None)
+    if choisi is None and exe:
+        choisi = exe[0]
+    fichier = url = sha256 = ""
+    taille = 0
+    if choisi:
+        fichier, url = str(choisi.get("name", "")), str(choisi.get("browser_download_url", ""))
+        try:
+            taille = int(choisi.get("size") or 0)
+        except (TypeError, ValueError):
+            taille = 0
+        digest = str(choisi.get("digest") or "")
+        if digest.lower().startswith("sha256:"):
+            sha256 = digest[7:].strip().lower()
+        if not nom_fichier_sur(fichier) or (MAJ_HTTPS_SEULEMENT and not url.startswith("https://")):
+            fichier = url = sha256 = ""
+            taille = 0                       # on proposera seulement la page de téléchargement
+    return {"version": str(release.get("tag_name")).strip().lstrip("vV"),
+            "page": str(release.get("html_url") or DEPOT_GITHUB),
+            "notes": str(release.get("body") or "")[:1500],
+            "fichier": fichier, "url": url, "taille": taille, "sha256": sha256}
+
+
+def telecharger_mise_a_jour(infos, ecrire, progres=None):
+    """Télécharge le nouveau .exe dans le dossier du programme, le vérifie (taille, SHA-256) puis
+    retourne son chemin. Le fichier est d'abord écrit en « .partiel » : jamais de fichier à moitié fini."""
+    import hashlib
+    nom, url, taille = infos.get("fichier", ""), infos.get("url", ""), infos.get("taille", 0)
+    if not nom or not url:
+        raise ValueError(T("maj_pas_de_fichier"))
+    if not nom_fichier_sur(nom):
+        raise ValueError(T("maj_nom_refuse", f=nom))
+    if MAJ_HTTPS_SEULEMENT and not url.startswith("https://"):
+        raise ValueError(T("maj_pas_de_fichier"))
+    final = os.path.join(DOSSIER, nom)
+    if getattr(sys, "frozen", False) and os.path.normcase(os.path.abspath(final)) == os.path.normcase(
+            os.path.abspath(sys.executable)):
+        final = os.path.join(DOSSIER, nom[:-4] + "-nouveau.exe")   # Windows ne peut pas écraser le .exe en cours
+    partiel = final + ".partiel"
+    if taille:
+        libre = espace_libre(DOSSIER)
+        if libre is not None and libre < taille + 50_000_000:
+            raise OSError(T("maj_place"))
+    ecrire(T("maj_dl_debut", f=nom, t=taille_texte(taille) if taille else "?"))
+    empreinte, recu, dernier = hashlib.sha256(), 0, -1
+    try:
+        requete = urllib.request.Request(url, headers={"User-Agent": f"GestModOllama/{VERSION}"})
+        with urllib.request.urlopen(requete, timeout=30) as r, open(partiel, "wb") as f:
+            if MAJ_HTTPS_SEULEMENT and not r.geturl().startswith("https://"):
+                raise ValueError(T("maj_pas_de_fichier"))      # redirection vers du http : refusée
+            while True:
+                morceau = r.read(1024 * 1024)
+                if not morceau:
+                    break
+                f.write(morceau)
+                empreinte.update(morceau)
+                recu += len(morceau)
+                if progres and taille:
+                    pct = min(100, recu * 100 // taille)
+                    if pct != dernier:
+                        dernier = pct
+                        progres(pct)
+        if recu == 0 or (taille and recu != taille):
+            raise OSError(T("maj_taille_ko"))
+        if infos.get("sha256"):
+            if empreinte.hexdigest().lower() != infos["sha256"].lower():
+                raise OSError(T("maj_sha_ko"))
+        else:
+            ecrire(T("maj_sha_absent"))
+        os.replace(partiel, final)
+    except BaseException:
+        try:
+            os.remove(partiel)
+        except OSError:
+            pass
+        raise
+    ecrire(T("maj_dl_ok", c=final))
+    return final
+
+
+def installer_mise_a_jour(nouveau):
+    """Remplace le .exe en cours par le nouveau puis le lance. Seulement en mode compilé (retourne False sinon).
+    Windows permet de RENOMMER un .exe pendant qu'il tourne (pas de l'écraser) : l'ancien devient « .ancien »,
+    supprimé au prochain démarrage par nettoyer_ancienne_version()."""
+    if not getattr(sys, "frozen", False):
+        return False
+    actuel = os.path.abspath(sys.executable)
+    # Le programme garde TOUJOURS son nom : les raccourcis et l'épingle de la barre des tâches
+    # continuent de fonctionner après la mise à jour.
+    cible = actuel
+    ancien = actuel + ".ancien"
+    if os.path.exists(ancien):
+        os.remove(ancien)
+    os.replace(actuel, ancien)
+    if os.path.abspath(nouveau) != os.path.abspath(cible):
+        try:
+            os.replace(nouveau, cible)
+        except Exception:
+            os.replace(ancien, actuel)          # échec : on remet l'ancien en place
+            raise
+    env = dict(os.environ)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"     # sinon le nouveau .exe réutilise le dossier temporaire du parent
+    try:
+        subprocess.Popen([cible], cwd=DOSSIER, env=env, close_fds=True)
+    except Exception:
+        # Lancement impossible (ex. antivirus) : on remet tout comme avant, le programme reste utilisable
+        try:
+            if os.path.abspath(nouveau) != os.path.abspath(cible):
+                os.replace(cible, nouveau)      # le nouveau fichier retourne à sa place téléchargée
+            os.replace(ancien, actuel)
+        except OSError:
+            pass
+        raise
+    return True
+
+
+def nettoyer_ancienne_version():
+    """En mode compilé : supprime les « .exe.ancien » laissés par une mise à jour (sans jamais planter)."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        for nom in os.listdir(DOSSIER):
+            if nom.lower().endswith((".exe.ancien", ".exe.partiel")):   # restes d'une mise à jour
+                try:
+                    os.remove(os.path.join(DOSSIER, nom))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------
 # 8) L'ICÔNE DU LOGICIEL (dessinée par le programme, sans fichier image)
 # ---------------------------------------------------------------
 # Un carré arrondi bleu avec un cube blanc (le cube représente un « modèle »).
@@ -3196,8 +3444,13 @@ def fenetre(garde=None):
         InfoBulle(aide, T("contexte_bulle"))
         InfoBulle(choix_ctx, T("contexte_bulle"))
 
+        # 4) Vérification des mises à jour au démarrage
+        var_maj_r = tk.BooleanVar(value=VERIF_MAJ)
+        ttk.Checkbutton(corps_r, text=T("maj_demarrage"), variable=var_maj_r).grid(
+            row=4, column=0, columnspan=3, sticky="w", pady=(px(8), 0))
+
         def enregistrer():
-            global CONTEXTE_CHOISI, LANGUE
+            global CONTEXTE_CHOISI, LANGUE, VERIF_MAJ
             texte_ctx = choix_ctx.get().strip()
             if texte_ctx == "" or texte_ctx.lower() == T("auto").lower():
                 nouveau_ctx = 0
@@ -3212,6 +3465,7 @@ def fenetre(garde=None):
             nouvelle_langue = next(code for code, nom in LANGUES if nom == choix_langue.get())
             change_langue = nouvelle_langue != LANGUE
             CONTEXTE_CHOISI, LANGUE = nouveau_ctx, nouvelle_langue
+            VERIF_MAJ = var_maj_r.get()
             if not sauver_reglages():
                 ecrire(T("reglages_non_sauves", f=FICHIER_REGLAGES))
             ecrire(T("reglages_ok", l=dict(LANGUES)[LANGUE], c=nouveau_ctx or T("auto")))
@@ -3224,16 +3478,16 @@ def fenetre(garde=None):
                     terminer()
 
         boutons_r = ttk.Frame(corps_r)
-        boutons_r.grid(row=4, column=0, columnspan=3, sticky="e", pady=(px(16), 0))
+        boutons_r.grid(row=5, column=0, columnspan=3, sticky="e", pady=(px(16), 0))
         ttk.Button(boutons_r, text=T("enregistrer"), style="Accent.TButton", command=enregistrer).pack(side="left")
         ttk.Button(boutons_r, text=T("annuler"), command=fen.destroy).pack(side="left", padx=(px(6), 0))
 
-        # 4) La signature, à la fin
-        ttk.Separator(corps_r).grid(row=5, column=0, columnspan=3, sticky="we", pady=(px(14), px(6)))
+        # 5) La signature, à la fin
+        ttk.Separator(corps_r).grid(row=6, column=0, columnspan=3, sticky="we", pady=(px(14), px(6)))
         ttk.Label(corps_r, text=T("credit", a=AUTEUR, l=LICENCE, y=ANNEE), foreground="#7a7f87",
-                  font=(POLICE, 8)).grid(row=6, column=0, columnspan=2, sticky="w")
+                  font=(POLICE, 8)).grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Label(corps_r, text=SIGNATURE, foreground="#7a7f87", font=(POLICE, 9, "italic")).grid(
-            row=6, column=2, sticky="e")
+            row=7, column=2, sticky="e")
         fen.bind("<Escape>", lambda _e: fen.destroy())
         fen.bind("<Return>", lambda _e: enregistrer())
         centrer(fen)
@@ -3260,17 +3514,155 @@ def fenetre(garde=None):
         ttk.Label(corps_a, text=T("credit", a=AUTEUR, l=LICENCE, y=ANNEE), style="Gris.TLabel",
                   font=(POLICE, 9)).pack()
         if DEPOT_GITHUB:
-            import webbrowser
             lien = ttk.Label(corps_a, text=T("lien_github"), foreground=C_ACCENT, cursor="hand2",
                              font=(POLICE, 9, "underline"))
             lien.pack(pady=(px(2), 0))
             lien.bind("<Button-1>", lambda _e: webbrowser.open(DEPOT_GITHUB))
+            # L'adresse en clair (sans « https:// »), petite et grise, cliquable elle aussi
+            adresse = ttk.Label(corps_a, text=re.sub(r"^https?://", "", DEPOT_GITHUB), style="Gris.TLabel",
+                                cursor="hand2", font=(POLICE, 8))
+            adresse.pack()
+            adresse.bind("<Button-1>", lambda _e: webbrowser.open(DEPOT_GITHUB))
         ttk.Label(corps_a, text=SIGNATURE, foreground="#7a7f87", font=(POLICE, 9, "italic")).pack(pady=(px(4), 0))
-        ttk.Button(corps_a, text="OK", style="Accent.TButton", command=f.destroy).pack(pady=(px(12), 0))
+        boutons_a = ttk.Frame(corps_a)
+        boutons_a.pack(pady=(px(12), 0))
+        ttk.Button(boutons_a, text="OK", style="Accent.TButton", command=f.destroy).pack(side="left")
+        ttk.Button(boutons_a, text=T("maj_verif_btn"),
+                   command=lambda: verifier_manuellement(f)).pack(side="left", padx=(px(8), 0))
         f.bind("<Escape>", lambda _e: f.destroy())
         f.bind("<Return>", lambda _e: f.destroy())
         centrer(f)
         f.grab_set()
+
+    # ===============================================================
+    # Mises à jour : proposition, vérification, téléchargement, installation
+    # ===============================================================
+    def proposer_maj(infos):
+        """Petite fenêtre qui propose la nouvelle version (notes, téléchargement, réglage de la vérification)."""
+        global VERIF_MAJ
+        if etat.get("maj_fenetre"):           # une seule fenêtre de mise à jour à la fois
+            return
+        etat["maj_fenetre"] = True
+        fen = tk.Toplevel(racine)
+        fen.title(T("maj_dispo_t"))
+        fen.transient(racine)
+        fen.resizable(False, False)
+        fen.configure(background=C_FOND)
+        corps_m = ttk.Frame(fen, padding=px(18))
+        corps_m.pack(fill="both", expand=True)
+        ttk.Label(corps_m, text=T("maj_dispo_t"), font=(POLICE, 13, "bold"),
+                  foreground=C_ACCENT_FONCE).pack(anchor="w")
+        ttk.Label(corps_m, text=T("maj_dispo", n=infos["version"], a=VERSION), wraplength=px(480)).pack(
+            anchor="w", pady=(px(6), px(8)))
+        if infos.get("notes"):
+            notes = scrolledtext.ScrolledText(corps_m, width=60, height=8, wrap="word", font=(POLICE, 9))
+            notes.insert("1.0", infos["notes"])
+            notes.configure(state="disabled")             # lecture seule
+            notes.pack(fill="both", expand=True)
+        var_maj = tk.BooleanVar(value=VERIF_MAJ)
+        ttk.Checkbutton(corps_m, text=T("maj_demarrage"), variable=var_maj).pack(anchor="w", pady=(px(10), 0))
+
+        def fermer_maj():
+            """Ferme la fenêtre en gardant le choix de la case à cocher."""
+            global VERIF_MAJ
+            if var_maj.get() != VERIF_MAJ:
+                VERIF_MAJ = var_maj.get()
+                sauver_reglages()
+            etat["maj_fenetre"] = False
+            fen.destroy()
+
+        def installer():
+            if etat["en_cours"] or etat["transfert"]:
+                messagebox.showinfo(T("maj_dispo_t"), T("maj_occupe"), parent=fen)
+                return
+            fermer_maj()
+            en_tache(lambda: telecharger_mise_a_jour(infos, ecrire, progres),
+                     lambda chemin, erreur: fin_telechargement_maj(infos, chemin, erreur),
+                     T("maj_statut", n=infos["version"]))
+
+        boutons_m = ttk.Frame(corps_m)
+        boutons_m.pack(fill="x", pady=(px(14), 0))
+        if getattr(sys, "frozen", False) and infos.get("url"):
+            ttk.Button(boutons_m, text=T("maj_telecharger"), style="Accent.TButton", command=installer).pack(
+                side="left")
+        ttk.Button(boutons_m, text=T("maj_page"),
+                   command=lambda: webbrowser.open(infos.get("page") or DEPOT_GITHUB)).pack(
+            side="left", padx=(px(6), 0))
+        ttk.Button(boutons_m, text=T("maj_plus_tard"), command=fermer_maj).pack(side="right")
+        fen.protocol("WM_DELETE_WINDOW", fermer_maj)
+        fen.bind("<Escape>", lambda _e: fermer_maj())
+        centrer(fen)
+        fen.grab_set()
+
+    def fin_telechargement_maj(infos, chemin, erreur):
+        """Appelé quand le téléchargement est fini : propose de redémarrer pour installer."""
+        if erreur:
+            messagebox.showerror(T("maj_dispo_t"), T("erreur", e=erreur), parent=racine)
+            return
+        if not messagebox.askyesno(T("maj_dispo_t"), T("maj_redemarrer", n=infos["version"]), parent=racine):
+            messagebox.showinfo(T("maj_dispo_t"), T("maj_fichier_dossier", c=chemin), parent=racine)
+            return
+        if etat["en_cours"]:                  # un test a démarré pendant le téléchargement : on ne le tue pas
+            messagebox.showinfo(T("maj_dispo_t"), T("maj_fichier_dossier", c=chemin), parent=racine)
+            return
+        try:
+            installe = installer_mise_a_jour(chemin)
+        except Exception as e:
+            messagebox.showerror(T("maj_dispo_t"), T("maj_install_err", e=e, c=chemin), parent=racine)
+            return
+        if installe:
+            etat["relancer"] = False          # on quitte pour de bon, sans confirmation
+            terminer()
+        else:
+            messagebox.showinfo(T("maj_dispo_t"), T("maj_fichier_dossier", c=chemin), parent=racine)
+
+    def verifier_manuellement(parent=None):
+        """Vérification demandée par l'utilisateur (menu Aide ou « À propos ») : répond toujours."""
+        if etat.get("maj_en_cours"):
+            return
+        etat["maj_en_cours"] = True
+
+        def tache():
+            try:
+                infos, erreur = chercher_mise_a_jour(), None
+            except Exception as e:
+                infos, erreur = None, e
+
+            def afficher():
+                etat["maj_en_cours"] = False
+                cadre = parent if parent is not None and parent.winfo_exists() else racine
+                if erreur:
+                    messagebox.showwarning(T("maj_dispo_t"), T("maj_erreur", e=erreur), parent=cadre)
+                elif infos is None:
+                    messagebox.showinfo(T("maj_dispo_t"), T("maj_a_jour", v=VERSION), parent=cadre)
+                else:
+                    if cadre is not racine:
+                        cadre.destroy()             # on ferme « À propos » avant la fenêtre de mise à jour
+                    proposer_maj(infos)
+            dans_ui(afficher)
+        threading.Thread(target=tache, daemon=True).start()
+
+    def verifier_au_demarrage():
+        """Vérification silencieuse ~3 s après l'ouverture : seulement une ligne dans le journal en cas d'erreur."""
+        global MAJ_VERIFIEE
+        if not VERIF_MAJ or MAJ_VERIFIEE or etat["ferme"]:
+            return
+
+        def tache():
+            global MAJ_VERIFIEE
+            try:
+                infos = chercher_mise_a_jour()
+            except Exception as e:
+                if not etat["ferme"]:
+                    MAJ_VERIFIEE = True
+                    ecrire(T("maj_erreur_journal", e=e))
+                return
+            if etat["ferme"]:                # fenêtre reconstruite (langue) : la nouvelle refera la vérification
+                return
+            MAJ_VERIFIEE = True              # une seule fois par lancement (pas à chaque changement de langue)
+            if infos:
+                dans_ui(lambda: proposer_maj(infos))
+        threading.Thread(target=tache, daemon=True).start()
 
     # ===============================================================
     # Benchmark : lancement des tests et rapport PDF
@@ -3685,6 +4077,10 @@ def fenetre(garde=None):
     menus.add_cascade(label=T("m_outils"), menu=m_outils)
 
     m_aide = tk.Menu(menus, tearoff=0)
+    m_aide.add_command(label=T("maj_verif"), command=verifier_manuellement)
+    if DEPOT_GITHUB:
+        m_aide.add_command(label=T("lien_github"), command=lambda: webbrowser.open(DEPOT_GITHUB))
+    m_aide.add_separator()
     m_aide.add_command(label=T("m_apropos"), command=a_propos)
     menus.add_cascade(label=T("m_aide"), menu=m_aide)
     racine.config(menu=menus)
@@ -3708,6 +4104,7 @@ def fenetre(garde=None):
         except tk.TclError:
             pass
     racine.after(80, placer_separations)
+    racine.after(3000, verifier_au_demarrage)
     threading.Thread(target=surveiller, daemon=True).start()
     actualiser()
     racine.mainloop()
@@ -3733,6 +4130,7 @@ if __name__ == "__main__":
         # Fabrique le fichier icone.ico (utilisé par compiler.bat pour l'icône du .exe)
         print("Icone creee :", ecrire_ico(sys.argv[2] if len(sys.argv) >= 3 else os.path.join(DOSSIER, "icone.ico")))
     else:
+        nettoyer_ancienne_version()
         charger_reglages()
         relancer, garde = True, {}
         while relancer:                       # reconstruit la fenêtre si la langue change
